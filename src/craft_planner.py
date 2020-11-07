@@ -37,10 +37,29 @@ def make_checker(rule):
     # Implement a function that returns a function to determine whether a state meets a
     # rule's requirements. This code runs once, when the rules are constructed before
     # the search is attempted.
+    # print(rule.items())
+
+    items_required = None
+    if 'Requires' in rule.keys():
+        items_required = rule.get('Requires').keys()
+
+    items_consumed = rule.get('Consumes')
 
     def check(state):
         # This code is called by graph(state) and runs millions of times.
         # Tip: Do something with rule['Consumes'] and rule['Requires'].
+        if items_required:
+            for item in items_required:
+                # Missing a required, non-consumed, item
+                if state.items[item] < 1:
+                    return False
+
+        if items_consumed:
+            for item, count in items_consumed:
+                # Not enough of the consumable items to craft
+                if state.items[item] < count:
+                    return False
+
         return True
 
     return check
@@ -50,11 +69,21 @@ def make_effector(rule):
     # Implement a function that returns a function which transitions from state to
     # new_state given the rule. This code runs once, when the rules are constructed
     # before the search is attempted.
+    items_produced = rule.get('Produces')
+    items_consumed = rule.get('Consumes')
 
     def effect(state):
         # This code is called by graph(state) and runs millions of times
         # Tip: Do something with rule['Produces'] and rule['Consumes'].
-        next_state = None
+        next_state = state.copy()
+        if items_produced:
+            for item, count in items_produced:
+                next_state[item] += count
+
+        if items_consumed:
+            for item, count in items_consumed:
+                next_state[item] -= count
+
         return next_state
 
     return effect
@@ -80,7 +109,7 @@ def graph(state):
             yield (r.name, r.effect(state), r.cost)
 
 
-def heuristic(state):
+def heuristic(state, goal):
     # Implement your heuristic here!
     return 0
 
@@ -94,6 +123,74 @@ def search(graph, state, is_goal, limit, heuristic):
     # in the path and the action that took you to this state
     while time() - start_time < limit:
         pass
+
+    # Failed to find a path
+    print(time() - start_time, 'seconds.')
+    print("Failed to find a path from", state, 'within time limit.')
+    return None
+
+def visit_valid_aStar(graph, visited, parent_map, storage, node, dist, heu):
+    visited.add(node)
+    visit_count = 0
+
+    successor_states = graph(node)
+    for s in successor_states:
+        if s[0] in visited:
+            continue
+
+        visited.add(s[0])
+        # Push onto fringe, child and distance to goal
+        # find the estimated distance to goal
+        h = heu(s[0])
+        # actual distance is stored as part of the item
+        storage.push((s, dist + s[2]), dist + h)
+        visit_count += 1
+
+        # keep track of parent of s[0]
+        parent_map[s[0]] = (node, s[1])
+    return visit_count
+
+
+def aStarSearch(graph, state, is_goal, limit, heuristic):
+    """
+    Search the node that has the lowest combined cost and heuristic first.
+    """
+    start_time = time()
+
+
+    start = state
+    visited_set = set()
+    parent_map = {start: None}
+    directions = Stack()
+    fringe = PriorityQueue()
+    result = []
+    goal = None
+    distance = 0
+    # Implement your search here! Use your heuristic here!
+    # When you find a path to the goal return a list of tuples [(state, action)]
+    # representing the path. Each element (tuple) of the list represents a state
+    # in the path and the action that took you to this state
+    while time() - start_time < limit:
+
+        visit_valid_aStar(problem, visited_set, parent_map, fringe, start, distance, heuristic)
+
+        while not (fringe.isEmpty()):
+            current, distance = fringe.pop()
+
+            if is_goal(current[0]):
+                goal = current[0]
+                break
+        visit_valid_aStar(problem, visited_set, parent_map, fringe, current[0], distance, heuristic)
+
+        parent = parent_map[goal]
+        while parent:
+            directions.push(parent[1])
+            parent = parent_map[parent[0]]
+
+        while not (directions.isEmpty()):
+            result.append(directions.pop())
+
+        return result
 
     # Failed to find a path
     print(time() - start_time, 'seconds.')

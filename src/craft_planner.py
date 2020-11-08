@@ -1,8 +1,11 @@
 import json
-from collections import namedtuple, defaultdict, OrderedDict
+from collections import namedtuple, defaultdict, OrderedDict, deque
+from queue import PriorityQueue
 from timeit import default_timer as time
 
 Recipe = namedtuple('Recipe', ['name', 'check', 'effect', 'cost'])
+SearchNode = namedtuple('SearchNode', ['state', 'causal_action'])
+
 
 
 class State(OrderedDict):
@@ -51,13 +54,13 @@ def make_checker(rule):
         if items_required:
             for item in items_required:
                 # Missing a required, non-consumed, item
-                if state.items[item] < 1:
+                if state[item] < 1:
                     return False
 
         if items_consumed:
-            for item, count in items_consumed:
+            for item, count in items_consumed.items():
                 # Not enough of the consumable items to craft
-                if state.items[item] < count:
+                if state[item] < count:
                     return False
 
         return True
@@ -77,11 +80,11 @@ def make_effector(rule):
         # Tip: Do something with rule['Produces'] and rule['Consumes'].
         next_state = state.copy()
         if items_produced:
-            for item, count in items_produced:
+            for item, count in items_produced.items():
                 next_state[item] += count
 
         if items_consumed:
-            for item, count in items_consumed:
+            for item, count in items_consumed.items():
                 next_state[item] -= count
 
         return next_state
@@ -92,10 +95,14 @@ def make_effector(rule):
 def make_goal_checker(goal):
     # Implement a function that returns a function which checks if the state has
     # met the goal criteria. This code runs once, before the search is attempted.
+    items_required = goal.items()
 
     def is_goal(state):
         # This code is used in the search process and may be called millions of times.
-        return False
+        for item, count in items_required:
+            if state[item] < count:
+                return False
+        return True
 
     return is_goal
 
@@ -109,11 +116,20 @@ def graph(state):
             yield (r.name, r.effect(state), r.cost)
 
 
-def heuristic(state, goal):
+def heuristic(state):
     # Implement your heuristic here!
-    return 0
+    # Value of state = (1 + (required - fufilled)/required) * Some constant
+
+    return 1
 
 def search(graph, state, is_goal, limit, heuristic):
+    """
+
+
+        Return:
+            A list of tuples (state, recipe_name) that show the path taken to reach goal
+            First element will be (state, None) as no recipe is needed to get to inital state.
+    """
 
     start_time = time()
 
@@ -121,33 +137,72 @@ def search(graph, state, is_goal, limit, heuristic):
     # When you find a path to the goal return a list of tuples [(state, action)]
     # representing the path. Each element (tuple) of the list represents a state
     # in the path and the action that took you to this state
+
+    # A node in the search space is the (state, action) tuple
+    distance    = 0
+    node = SearchNode(state, None)
+
+    visited_set = set()
+
+    # A map of nodes and their parents
+    parent_map  = {node: None}
+    result_path = []
+
+    # An element of the priority queue (distance_remaining, (node, distance_traveled))
+    fringe      = PriorityQueue()
+    fringe.put((distance, (node, distance)))
+
+    goal = None
+
     while time() - start_time < limit:
-        pass
+
+        while not fringe.empty():
+            distance, fringe_node = fringe.get()
+            #print(fringe_node)
+
+            if is_goal(fringe_node[0].state):
+                goal = fringe_node[0]
+                break
+
+            visit_valid_aStar(graph, visited_set, parent_map, fringe, fringe_node, heuristic)
+
+        # Search has completed unsucessfuly
+        if not goal:
+            break
+
+        while goal:
+            result_path.append(goal)
+            goal = parent_map[goal]
+
+        result_path = result_path[::-1]
+        return result_path
+
 
     # Failed to find a path
     print(time() - start_time, 'seconds.')
     print("Failed to find a path from", state, 'within time limit.')
     return None
 
-def visit_valid_aStar(graph, visited, parent_map, storage, node, dist, heu):
-    visited.add(node)
+def visit_valid_aStar(graph, visited, parent_map, storage, storage_node, heu):
+    visited.add(storage_node[0])
     visit_count = 0
 
-    successor_states = graph(node)
-    for s in successor_states:
-        if s[0] in visited:
+    successor_states = graph(storage_node[0].state)
+    for rule, next_state, next_cost in successor_states:
+        c_node = SearchNode(next_state, rule)
+        if c_node in visited:
             continue
 
-        visited.add(s[0])
+        visited.add(c_node)
         # Push onto fringe, child and distance to goal
         # find the estimated distance to goal
-        h = heu(s[0])
+        h = heu(c_node.state)
         # actual distance is stored as part of the item
-        storage.push((s, dist + s[2]), dist + h)
+        storage.put((storage_node[1] + h, (c_node, storage_node[1] + next_cost)))
         visit_count += 1
 
         # keep track of parent of s[0]
-        parent_map[s[0]] = (node, s[1])
+        parent_map[c_node] = storage_node[0]
     return visit_count
 
 
@@ -155,32 +210,17 @@ def aStarSearch(graph, state, is_goal, limit, heuristic):
     """
     Search the node that has the lowest combined cost and heuristic first.
     """
-    start_time = time()
-
-
-    start = state
-    visited_set = set()
-    parent_map = {start: None}
-    directions = Stack()
-    fringe = PriorityQueue()
-    result = []
-    goal = None
-    distance = 0
-    # Implement your search here! Use your heuristic here!
-    # When you find a path to the goal return a list of tuples [(state, action)]
-    # representing the path. Each element (tuple) of the list represents a state
-    # in the path and the action that took you to this state
     while time() - start_time < limit:
 
-        visit_valid_aStar(problem, visited_set, parent_map, fringe, start, distance, heuristic)
+        visit_valid_aStar(graph, visited_set, parent_map, fringe, start, distance, heuristic)
 
         while not (fringe.isEmpty()):
-            current, distance = fringe.pop()
+            current, distance = fringe.get()
 
             if is_goal(current[0]):
                 goal = current[0]
                 break
-        visit_valid_aStar(problem, visited_set, parent_map, fringe, current[0], distance, heuristic)
+        visit_valid_aStar(graph, visited_set, parent_map, fringe, current[0], distance, heuristic)
 
         parent = parent_map[goal]
         while parent:
@@ -230,9 +270,10 @@ if __name__ == '__main__':
 
     # Search for a solution
     resulting_plan = search(graph, state, is_goal, 5, heuristic)
+    # resulting_plan = aStarSearch(graph, state, is_goal, 5, heuristic)
 
     if resulting_plan:
         # Print resulting plan
         for state, action in resulting_plan:
             print('\t',state)
-            print(action)
+
